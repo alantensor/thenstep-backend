@@ -21,8 +21,6 @@ const prompt_to_split_query_type =
   "Determine if 1. the user wants directions to a specific place, or 2. suggestions for activities or locations. Type only 1 or 2 as your answer.";
 const prompt_to_get_address =
   "Extract the address, location, or physical location from the query string. Only the address should be returned. You have to return something, can't be empty. Respond only with the address.";
-const route_categories = ["safety - the safest route, good ", "scenery"];
-const checkpoint_prompt = "Give me physical locations The user wants to choose a route which matches the following criteria: ";
 
 // HELPER FUNCTIONS
 
@@ -149,11 +147,21 @@ const getCheckpoints = async () => {
 
 const parseWebResults = async (obj) => {
   // get coords from obj.events
-  for (ev in obj.events) {
-    const suggestions = await getPlaceSuggestions(ev.address);
-    ev.lat = suggestions[0].lat;
-    ev.lng = suggestions[0].lng;
+  // for (ev in obj.events) {
+    // const suggestions = await getPlaceSuggestions(ev.address);
+  //   ev.lat = suggestions[0].lat;
+  //   ev.lng = suggestions[0].lng;
+  // }
+
+  for(let i =0; i < obj.events.length; i++) {
+    const eve = obj.events[i];
+    const suggestions = await getPlaceSuggestions(eve.address);
+    console.log(eve.name, eve.address, eve.time);
+    eve.lat = suggestions[0].lat;
+    eve.lng = suggestions[0].lng;
+    console.log(eve.lat, eve.lng);
   }
+  console.log("EVENTS: ", obj.events);
   return JSON.stringify(obj);
 }
 
@@ -257,7 +265,13 @@ app.get("/search", async (req, res) => {
   }
 });
 
-app.get("/checkpoints", async (req, res) => {  
+const route_categories = ["safety - the safest route, good ", "scenery"];
+const checkpoint_prompt = "Give me physical locations The user wants to choose a route which matches the following criteria: ";
+
+// checkpoints {scenic: [[lat, ln], {lat ln}, ...], safety: []}
+app.get("/checkpoints", async (req, res) => { 
+
+
 });
 
 app.listen(port, () => {
