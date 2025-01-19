@@ -3,6 +3,7 @@ import OpenAI from "openai";
 const express = require("express");
 const axios = require("axios");
 
+
 const app = express();
 const port = 3001;
 
@@ -22,25 +23,50 @@ const prompt_to_split_query_type =
 const prompt_to_get_address =
   "Extract the address, location, or physical location from the query string. Only the address should be returned. You have to return something, can't be empty. Respond only with the address.";
 
+const checkpoint_prompt = `You are a route planner AI specialized in generating physical checkpoints (addresses of real-world locations) along a route. Your goal is to provide a series of logical checkpoints that reflect the user's priority: either 'scenery' or 'safety.'
+
+  Given a start address and an end address, you will:
+  1. Understand the user's preference ('scenery' or 'safety').
+  2. Generate a detailed route that includes real physical addresses of recognizable locations (e.g., parks, cafes, rest stops, or landmarks) as checkpoints. Each checkpoint must be evenly spaced and relevant to the selected priority.
+  3. Return the route in JSON format as follows:
+  {
+    "start": "Start Address",
+    "scenic": ["address1", "address2", ...],
+    "safety": ["address1", "address2", ...],
+    "end": "End Address"
+  }
+  Ensure all addresses are full physical addresses, including the street name, city, and postal/ZIP code where possible.
+  Keep all responses concise and focus on accurate, relevant information. If a specific location cannot be identified, select a nearby notable address that matches the route preference. Never leave a route incomplete. Only answer in JSON.`;
+
+
 // HELPER FUNCTIONS
 
-const getLatLon = async (data) => {
-  Promise.all(data.predictions.map(async (prediction) => {
-    const detailsResponse = await fetch(
-      `https://maps.googleapis.com/maps/api/place/details/json?place_id=${prediction.place_id}&key=${mapsApiKey}`
+// Parse GPT JSON response
+const parseGPTResponseToJSON = (str) => {
+  const jsonStringMatch = response.match(/{[\s\S]*}/);
+  const new_res_string = jsonStringMatch[0];
+  return JSON.parse(new_res_string);
+};
+
+// Function to get address from latitude and longitude using Google Maps Geocoding API
+async function getAddressFromLatLng(lat, lng) {
+  try {
+    const response = await fetch(
+      `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${mapsApiKey}`
     );
-    if (!detailsResponse.ok) {
-      throw new Error(`Places Details API request failed with status ${detailsResponse.status}`);
+    if (!response.ok) {
+      throw new Error(`Geocoding API request failed with status ${response.status}`);
     }
-    const detailsData = await detailsResponse.json();
-    const location = detailsData.result.geometry.location;
-    return {
-      description: prediction.description,
-      placeId: prediction.place_id,
-      lat: location.lat,
-      lng: location.lng
-    };
-  }));
+    const data = await response.json();
+    if (data.results.length === 0) {
+      console.warn("No address found for the given coordinates:", lat, lng);
+      return null;
+    }
+    return data.results[0].formatted_address;
+  } catch (error) {
+    console.error("Error in getAddressFromLatLng:", error);
+    return null;
+  }
 }
 
 // Get places suggestions from Google Places Autocomplete API
@@ -125,24 +151,67 @@ const determineIntent = async (query) => {
   return completion.choices[0].message.content;
 };
 
-const getCheckpoints = async () => {
+// Function to get latitude and longitude from an address string using Google Maps Geocoding API
+async function getLatLngFromString(address) {
+  try {
+    const response = await fetch(
+      `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${mapsApiKey}`
+    );
+    if (!response.ok) {
+      throw new Error(`Geocoding API request failed with status ${response.status}`);
+    }
+    const data = await response.json();
+    if (data.results.length === 0) {
+      console.warn("No results found for the given address:", address);
+      return null;
+    }
+    const location = data.results[0].geometry.location;
+    return { lat: location.lat, lng: location.lng };
+  } catch (error) {
+    console.error("Error in getLatLngFromString:", error);
+    return null;
+  }
+}
+
+// checkpoints {scenic: [[lat, ln], [lat ln], ...], safety: []}
+const getCheckpoints = async (lat, lng, route_type) => {
   // get scenic and safety checkpoints
   const openai = new OpenAI({
     apiKey: process.env.OPENAI_KEY,
     dangerouslyAllowBrowser: true,
   });
 
+  const address = await getAddressFromLatLng(lat, lng);
+
   const messages = [
-    { role: "system", content: "The user wants to choose a route which matches the following criteria:" },
-    { role: "user", content: "show scenic and safety checkpoints" },
+    { role: "system", content: checkpoint_prompt },
+    { role: "user", content: `User wants ${route_type} route. User starts from ${address}` }
   ];
 
   const completion = await openai.chat.completions.create({
     messages: messages,
     model: "gpt-4o-mini",
   });
-  // console.log("CHAT GPT REPONSE: "+completion.choices[0].message.content);
-  return completion.choices[0].message.content;
+
+  const result = completion.choices[0].message.content;
+  // const jsonStringMatch = result.match(/{[\s\S]*}/);
+  // const new_res_string = jsonStringMatch[0];
+  const result_json = parseGPTResponseToJSON(result);
+  console.log(result);
+  console.log(result_json);
+
+  const scenic = await Promise.all(result_json.scenic.map(async (a) => {
+    const location = await getLatLngFromString(a);
+    return [location.lat, location.lng];
+  }));
+
+  const safety = await Promise.all(result_json.safety.map(async (a) => {
+    const location = await getLatLngFromString(a);
+    return [location.lat, location.lng];
+  }));
+
+  console.log("CHAT GPT REPONSE: "+completion.choices[0].message.content);
+  return { scenic: scenic, safety: safety };
 }
 
 const parseWebResults = async (obj) => {
@@ -210,11 +279,15 @@ app.get("/search", async (req, res) => {
         );
       }
       const googleData = await googleResponse.json();
-      console.log(googleData);
+      console.log("GOOGLE DATA", googleData);
       // console.log(googleResponse);
 
       // // Extract search results
-      const searchResults = googleData.items
+      let searchResults;
+      if (!googleData || !googleData.items) {
+        searchResults = {}
+      }
+      searchResults = googleData.items
         .map((item) => item.snippet)
         .join("\n");
       console.log("SEARCH RESULTS: " + searchResults);
@@ -239,8 +312,7 @@ app.get("/search", async (req, res) => {
       });
 
       const res_string = completion.choices[0].message.content;
-      const jsonStringMatch = res_string.match(/{[\s\S]*}/);
-      const new_res_string = jsonStringMatch[0];
+      const new_res_string = parseGPTResponseToJSON(res_string);
 
       // console.log("CHAT GPT STRING",res_string);
       console.log("REGEX CHAT GPT STRING",new_res_string);
@@ -266,12 +338,16 @@ app.get("/search", async (req, res) => {
 });
 
 const route_categories = ["safety - the safest route, good ", "scenery"];
-const checkpoint_prompt = "Give me physical locations The user wants to choose a route which matches the following criteria: ";
 
-// checkpoints {scenic: [[lat, ln], {lat ln}, ...], safety: []}
+
+// checkpoints {scenic: [[lat, ln], [lat ln], ...], safety: []}
 app.get("/checkpoints", async (req, res) => { 
+  const lat = req.query.lat;
+  const lng = req.query.lng;
+  const route_type = req.query.type;
 
-
+  const checkpoints = await getCheckpoints(lat, lng, route_type);
+  return res.json(checkpoints);
 });
 
 app.listen(port, () => {
