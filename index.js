@@ -321,24 +321,19 @@ app.get("/search", async (req, res) => {
         model: "gpt-4o-mini",
       });
 
-      const res_string = completion.choices[0].message.content;
-      const new_res_string = parseGPTResponseToJSON(res_string);
+      let res_string = completion.choices[0].message.content;
+      let new_res_json = parseGPTResponseToJSON(res_string);
 
-      // console.log("CHAT GPT STRING",res_string);
-      console.log("REGEX CHAT GPT STRING",new_res_string);
-
-      console.log("LN LAT ADDED CHAT GPT STRING",new_res_string);
-      const res_json = JSON.parse(new_res_string);
-      const new_res_json = await parseWebResults(res_json);
+      new_res_json = await parseWebResults(new_res_json);
       
       // "list of 'cities' with 'name' 'state' 'country', list of 'landmarks' (string), list of 'events' with 'name' and 'date' and 'time'
-      console.log("CHAT GPT JSON: " + JSON.stringify(new_res_json));
+      // console.log("CHAT GPT JSON: " + JSON.stringify(new_res_json));
 
       
       // Format of endpoint response
       const places = { places: suggestions, webresults: new_res_json };
 
-      console.log("ENDPOINT RESPONSE: " + JSON.stringify(places));
+      // console.log("ENDPOINT RESPONSE: " + JSON.stringify(places));
       return res.json(places);
     } catch (error) {
       console.error(error);
