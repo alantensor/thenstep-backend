@@ -51,7 +51,7 @@ const checkpoint_prompt = `You are a route planner AI specialized in generating 
 
 // Parse GPT JSON response
 const parseGPTResponseToJSON = (str) => {
-  const jsonStringMatch = response.match(/{[\s\S]*}/);
+  const jsonStringMatch = str.match(/{[\s\S]*}/);
   const new_res_string = jsonStringMatch[0];
   return JSON.parse(new_res_string);
 };
