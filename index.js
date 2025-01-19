@@ -18,9 +18,9 @@ const systemPrompt =
   "Extract city names, location data, country names, any geographical location, landmarks, etc. from the following text:, and format it in json (only the json object!), accorinding to the following specification: " +
   spec;
 const prompt_to_split_query_type =
-  "Act as a location assistant. Determine if 1. the user wants directions to a specific place, or 2. suggestions for activities or locations. Type only 1 or 2 as your answer.";
+  "Determine if 1. the user wants directions to a specific place, or 2. suggestions for activities or locations. Type only 1 or 2 as your answer.";
 const prompt_to_get_address =
-  "Extract the address, location, or physical location from the query string. Only the address should be returned.";
+  "Extract the address, location, or physical location from the query string. Only the address should be returned. You have to return something, can't be empty. Respond only with the address.";
 const route_categories = ["safety - the safest route, good ", "scenery"];
 const checkpoint_prompt = "Give me physical locations The user wants to choose a route which matches the following criteria: ";
 
@@ -163,13 +163,12 @@ app.get("/search", async (req, res) => {
   }
 
   const intent = await determineIntent(query);
+  const nadd = await getAddress(query);
+  const suggestions = await getPlaceSuggestions(nadd + " ");
 
   // Navigation
   if (intent === "1") {
       // return { places: [{desc place-id lat lng}], webresults: [] } 
-    const nadd = await getAddress(query);
-    const suggestions = await getPlaceSuggestions(nadd + " ");
-
     for (const suggestion of suggestions) {
       console.log("PLACE SUGGESTION: " + suggestion.description + suggestion.lat + suggestion.lng); 
     }
@@ -229,7 +228,11 @@ app.get("/search", async (req, res) => {
       const res_json = JSON.parse(new_res_string);
       // "list of 'cities' with 'name' 'state' 'country', list of 'landmarks' (string), list of 'events' with 'name' and 'date' and 'time'
       console.log("CHAT GPT JSON: " + JSON.stringify(res_json));
-      const places = { places: res_json, webresults: res_json };
+
+      
+      // Format of endpoint response
+      const places = { places: suggestions, webresults: res_json };
+
       console.log("ENDPOINT RESPONSE: " + JSON.stringify(places));
       return res.json(places);
     } catch (error) {
